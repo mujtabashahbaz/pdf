@@ -15,6 +15,9 @@
             --light-text: #777;
             --border-color: #ddd;
             --shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --error-color: #dc3545;
         }
 
         * {
@@ -132,6 +135,14 @@
 
         .btn-danger:hover {
             background-color: #ff5252;
+        }
+
+        .btn-success {
+            background-color: var(--success-color);
+        }
+
+        .btn-success:hover {
+            background-color: #218838;
         }
 
         #fileInput {
@@ -258,6 +269,21 @@
             opacity: 1;
         }
 
+        .image-preview.invalid {
+            border-color: var(--error-color);
+        }
+
+        .image-preview .invalid-badge {
+            position: absolute;
+            bottom: 5px;
+            left: 5px;
+            background-color: var(--error-color);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
         .action-buttons {
             display: flex;
             justify-content: center;
@@ -284,6 +310,33 @@
             background-color: var(--secondary-color);
             min-width: 100px;
             text-align: center;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .alert-error {
+            background-color: rgba(220, 53, 69, 0.1);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+            color: var(--error-color);
+        }
+
+        .alert-warning {
+            background-color: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            color: var(--warning-color);
+        }
+
+        .alert-success {
+            background-color: rgba(40, 167, 69, 0.1);
+            border: 1px solid rgba(40, 167, 69, 0.3);
+            color: var(--success-color);
         }
 
         footer {
@@ -327,6 +380,7 @@
                     <input type="file" id="fileInput" accept="image/*" multiple>
                 </div>
                 <div class="file-info" id="fileInfo">No files selected</div>
+                <div id="uploadAlert" class="alert" style="display: none;"></div>
             </section>
 
             <section class="options-section">
@@ -438,20 +492,20 @@
             </section>
 
             <div class="action-buttons">
-                <button class="btn" id="clearBtn">
+                <button class="btn btn-danger" id="clearBtn">
                     <i class="fas fa-trash"></i> Clear All
                 </button>
                 <button class="btn btn-secondary" id="reorderBtn">
                     <i class="fas fa-sort"></i> Reorder Images
                 </button>
-                <button class="btn" id="downloadBtn" disabled>
+                <button class="btn btn-success" id="downloadBtn" disabled>
                     <i class="fas fa-file-pdf"></i> Generate & Download PDF
                 </button>
             </div>
         </div>
 
         <footer>
-            <p>Image to PDF Converter - Free online tool | No files are uploaded to any server</p>
+            <p>Image to PDF Converter - Free online tool | All processing happens in your browser</p>
         </footer>
     </div>
 
@@ -468,6 +522,7 @@
         const downloadBtn = document.getElementById('downloadBtn');
         const pageCount = document.getElementById('pageCount');
         const spreadPreview = document.getElementById('spreadPreview');
+        const uploadAlert = document.getElementById('uploadAlert');
 
         // Options elements
         const pageSize = document.getElementById('pageSize');
@@ -516,6 +571,22 @@
         updateSpreadPreview();
 
         // Functions
+        function showAlert(message, type = 'error') {
+            uploadAlert.textContent = message;
+            uploadAlert.className = `alert alert-${type}`;
+            uploadAlert.style.display = 'flex';
+            
+            if (type !== 'error') {
+                setTimeout(() => {
+                    uploadAlert.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        function hideAlert() {
+            uploadAlert.style.display = 'none';
+        }
+
         function handleDragOver(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -551,33 +622,86 @@
             }
         }
 
+        function isValidImageFile(file) {
+            const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
+            const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+            const extension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+            
+            return validTypes.includes(file.type) || validExtensions.includes(extension);
+        }
+
         function handleFiles(files) {
-            const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+            hideAlert();
+            
+            const imageFiles = Array.from(files).filter(file => {
+                if (!isValidImageFile(file)) {
+                    showAlert(`Skipped invalid file: ${file.name}`, 'warning');
+                    return false;
+                }
+                return true;
+            });
             
             if (imageFiles.length === 0) {
-                alert('Please select image files only.');
+                showAlert('Please select valid image files only (JPEG, PNG, GIF, WebP, BMP).');
                 return;
             }
 
+            let loadedCount = 0;
+            let errorCount = 0;
+            
             imageFiles.forEach(file => {
                 const reader = new FileReader();
+                
                 reader.onload = (e) => {
                     const img = new Image();
+                    
                     img.onload = () => {
                         images.push({
                             file,
                             dataUrl: e.target.result,
                             width: img.width,
-                            height: img.height
+                            height: img.height,
+                            valid: true
                         });
-                        updatePreview();
+                        loadedCount++;
+                        if (loadedCount + errorCount === imageFiles.length) {
+                            updatePreview();
+                            fileInfo.textContent = `${loadedCount} image(s) loaded${errorCount > 0 ? `, ${errorCount} failed` : ''}`;
+                            if (errorCount > 0) {
+                                showAlert(`${errorCount} image(s) failed to load`, 'warning');
+                            }
+                        }
                     };
+                    
+                    img.onerror = () => {
+                        console.error('Failed to load image:', file.name);
+                        errorCount++;
+                        if (loadedCount + errorCount === imageFiles.length) {
+                            updatePreview();
+                            fileInfo.textContent = `${loadedCount} image(s) loaded${errorCount > 0 ? `, ${errorCount} failed` : ''}`;
+                            if (errorCount > 0) {
+                                showAlert(`${errorCount} image(s) failed to load`, 'warning');
+                            }
+                        }
+                    };
+                    
                     img.src = e.target.result;
                 };
+                
+                reader.onerror = () => {
+                    console.error('Error reading file:', file.name);
+                    errorCount++;
+                    if (loadedCount + errorCount === imageFiles.length) {
+                        updatePreview();
+                        fileInfo.textContent = `${loadedCount} image(s) loaded${errorCount > 0 ? `, ${errorCount} failed` : ''}`;
+                        if (errorCount > 0) {
+                            showAlert(`${errorCount} image(s) failed to load`, 'warning');
+                        }
+                    }
+                };
+                
                 reader.readAsDataURL(file);
             });
-
-            fileInfo.textContent = `${imageFiles.length} image(s) selected`;
         }
 
         function updatePreview() {
@@ -592,7 +716,7 @@
 
             images.forEach((image, index) => {
                 const previewDiv = document.createElement('div');
-                previewDiv.className = 'image-preview';
+                previewDiv.className = `image-preview ${image.valid ? '' : 'invalid'}`;
                 
                 const img = document.createElement('img');
                 img.src = image.dataUrl;
@@ -610,10 +734,18 @@
                 
                 previewDiv.appendChild(img);
                 previewDiv.appendChild(removeBtn);
+                
+                if (!image.valid) {
+                    const invalidBadge = document.createElement('div');
+                    invalidBadge.className = 'invalid-badge';
+                    invalidBadge.textContent = 'Invalid';
+                    previewDiv.appendChild(invalidBadge);
+                }
+                
                 previewContainer.appendChild(previewDiv);
             });
 
-            downloadBtn.disabled = false;
+            downloadBtn.disabled = images.filter(img => img.valid).length === 0;
             updatePageCount();
         }
 
@@ -621,6 +753,7 @@
             images = [];
             fileInput.value = '';
             fileInfo.textContent = 'No files selected';
+            hideAlert();
             updatePreview();
         }
 
@@ -634,8 +767,9 @@
         }
 
         function updatePageCount() {
+            const validImages = images.filter(img => img.valid);
             const spread = parseInt(pageSpread.value);
-            const pages = Math.ceil(images.length / spread);
+            const pages = Math.ceil(validImages.length / spread);
             pageCount.textContent = `${pages} page${pages !== 1 ? 's' : ''}`;
         }
 
@@ -667,7 +801,11 @@
         }
 
         async function generatePDF() {
-            if (images.length === 0) return;
+            const validImages = images.filter(img => img.valid);
+            if (validImages.length === 0) {
+                showAlert('No valid images to convert');
+                return;
+            }
 
             try {
                 downloadBtn.disabled = true;
@@ -720,138 +858,158 @@
                 const availableWidth = pageWidth - (margin * 2);
                 const availableHeight = pageHeight - (margin * 2);
                 
-                // Process images in batches based on spread
-                for (let i = 0; i < images.length; i += spread) {
+                // Process valid images in batches based on spread
+                for (let i = 0; i < validImages.length; i += spread) {
                     const page = pdfDoc.addPage([pageWidth, pageHeight]);
-                    const batch = images.slice(i, i + spread);
+                    const batch = validImages.slice(i, i + spread);
                     
                     // For each image in the current spread
                     for (let j = 0; j < batch.length; j++) {
                         const imageData = batch[j];
-                        const image = await pdfDoc.embedJpg(imageData.dataUrl);
                         
-                        // Calculate position and size based on spread
-                        let x, y, width, height;
-                        
-                        if (spread === 1) {
-                            // Single image per page
-                            if (stretchToFit.checked) {
-                                width = availableWidth;
-                                height = availableHeight;
+                        try {
+                            let image;
+                            
+                            // Try to determine image type
+                            if (imageData.file.type === 'image/png' || imageData.dataUrl.startsWith('data:image/png')) {
+                                image = await pdfDoc.embedPng(imageData.dataUrl);
+                            } else if (imageData.file.type === 'image/jpeg' || imageData.dataUrl.startsWith('data:image/jpeg')) {
+                                image = await pdfDoc.embedJpg(imageData.dataUrl);
                             } else {
-                                const aspectRatio = image.width / image.height;
-                                
-                                if (maintainAspectRatio.checked) {
-                                    // Fit while maintaining aspect ratio
-                                    const scaleWidth = availableWidth / image.width;
-                                    const scaleHeight = availableHeight / image.height;
-                                    const finalScale = Math.min(scaleWidth, scaleHeight) * scale;
-                                    
-                                    width = image.width * finalScale;
-                                    height = image.height * finalScale;
-                                } else {
-                                    // Scale without maintaining aspect ratio
-                                    width = image.width * scale;
-                                    height = image.height * scale;
+                                // Fallback to trying both formats
+                                try {
+                                    image = await pdfDoc.embedJpg(imageData.dataUrl);
+                                } catch (e) {
+                                    image = await pdfDoc.embedPng(imageData.dataUrl);
                                 }
                             }
                             
-                            // Position the image
-                            x = margin + (availableWidth - width) / 2;
-                            y = margin + (availableHeight - height) / 2;
+                            // Calculate position and size based on spread
+                            let x, y, width, height;
                             
-                            // Apply position override
-                            switch (imagePosition.value) {
-                                case 'top':
-                                    y = margin + availableHeight - height;
-                                    break;
-                                case 'bottom':
-                                    y = margin;
-                                    break;
-                                case 'left':
-                                    x = margin;
-                                    break;
-                                case 'right':
-                                    x = margin + availableWidth - width;
-                                    break;
-                            }
-                            
-                        } else if (spread === 2) {
-                            // Two images per page (spread)
-                            const halfWidth = availableWidth / 2;
-                            
-                            if (stretchToFit.checked) {
-                                width = halfWidth;
-                                height = availableHeight;
-                            } else {
-                                const aspectRatio = image.width / image.height;
-                                
-                                if (maintainAspectRatio.checked) {
-                                    // Fit while maintaining aspect ratio
-                                    const scaleWidth = halfWidth / image.width;
-                                    const scaleHeight = availableHeight / image.height;
-                                    const finalScale = Math.min(scaleWidth, scaleHeight) * scale;
-                                    
-                                    width = image.width * finalScale;
-                                    height = image.height * finalScale;
+                            if (spread === 1) {
+                                // Single image per page
+                                if (stretchToFit.checked) {
+                                    width = availableWidth;
+                                    height = availableHeight;
                                 } else {
-                                    // Scale without maintaining aspect ratio
-                                    width = image.width * scale;
-                                    height = image.height * scale;
-                                }
-                            }
-                            
-                            // Position the image (left or right)
-                            x = margin + (j * halfWidth) + (halfWidth - width) / 2;
-                            y = margin + (availableHeight - height) / 2;
-                            
-                        } else if (spread === 4) {
-                            // Four images per page (grid)
-                            const halfWidth = availableWidth / 2;
-                            const halfHeight = availableHeight / 2;
-                            
-                            if (stretchToFit.checked) {
-                                width = halfWidth;
-                                height = halfHeight;
-                            } else {
-                                const aspectRatio = image.width / image.height;
-                                
-                                if (maintainAspectRatio.checked) {
-                                    // Fit while maintaining aspect ratio
-                                    const scaleWidth = halfWidth / image.width;
-                                    const scaleHeight = halfHeight / image.height;
-                                    const finalScale = Math.min(scaleWidth, scaleHeight) * scale;
+                                    const aspectRatio = imageData.width / imageData.height;
                                     
-                                    width = image.width * finalScale;
-                                    height = image.height * finalScale;
-                                } else {
-                                    // Scale without maintaining aspect ratio
-                                    width = image.width * scale;
-                                    height = image.height * scale;
+                                    if (maintainAspectRatio.checked) {
+                                        // Fit while maintaining aspect ratio
+                                        const scaleWidth = availableWidth / imageData.width;
+                                        const scaleHeight = availableHeight / imageData.height;
+                                        const finalScale = Math.min(scaleWidth, scaleHeight) * scale;
+                                        
+                                        width = imageData.width * finalScale;
+                                        height = imageData.height * finalScale;
+                                    } else {
+                                        // Scale without maintaining aspect ratio
+                                        width = imageData.width * scale;
+                                        height = imageData.height * scale;
+                                    }
                                 }
+                                
+                                // Position the image
+                                x = margin + (availableWidth - width) / 2;
+                                y = margin + (availableHeight - height) / 2;
+                                
+                                // Apply position override
+                                switch (imagePosition.value) {
+                                    case 'top':
+                                        y = margin + availableHeight - height;
+                                        break;
+                                    case 'bottom':
+                                        y = margin;
+                                        break;
+                                    case 'left':
+                                        x = margin;
+                                        break;
+                                    case 'right':
+                                        x = margin + availableWidth - width;
+                                        break;
+                                }
+                                
+                            } else if (spread === 2) {
+                                // Two images per page (spread)
+                                const halfWidth = availableWidth / 2;
+                                
+                                if (stretchToFit.checked) {
+                                    width = halfWidth;
+                                    height = availableHeight;
+                                } else {
+                                    const aspectRatio = imageData.width / imageData.height;
+                                    
+                                    if (maintainAspectRatio.checked) {
+                                        // Fit while maintaining aspect ratio
+                                        const scaleWidth = halfWidth / imageData.width;
+                                        const scaleHeight = availableHeight / imageData.height;
+                                        const finalScale = Math.min(scaleWidth, scaleHeight) * scale;
+                                        
+                                        width = imageData.width * finalScale;
+                                        height = imageData.height * finalScale;
+                                    } else {
+                                        // Scale without maintaining aspect ratio
+                                        width = imageData.width * scale;
+                                        height = imageData.height * scale;
+                                    }
+                                }
+                                
+                                // Position the image (left or right)
+                                x = margin + (j * halfWidth) + (halfWidth - width) / 2;
+                                y = margin + (availableHeight - height) / 2;
+                                
+                            } else if (spread === 4) {
+                                // Four images per page (grid)
+                                const halfWidth = availableWidth / 2;
+                                const halfHeight = availableHeight / 2;
+                                
+                                if (stretchToFit.checked) {
+                                    width = halfWidth;
+                                    height = halfHeight;
+                                } else {
+                                    const aspectRatio = imageData.width / imageData.height;
+                                    
+                                    if (maintainAspectRatio.checked) {
+                                        // Fit while maintaining aspect ratio
+                                        const scaleWidth = halfWidth / imageData.width;
+                                        const scaleHeight = halfHeight / imageData.height;
+                                        const finalScale = Math.min(scaleWidth, scaleHeight) * scale;
+                                        
+                                        width = imageData.width * finalScale;
+                                        height = imageData.height * finalScale;
+                                    } else {
+                                        // Scale without maintaining aspect ratio
+                                        width = imageData.width * scale;
+                                        height = imageData.height * scale;
+                                    }
+                                }
+                                
+                                // Position the image in grid
+                                const row = Math.floor(j / 2);
+                                const col = j % 2;
+                                
+                                x = margin + (col * halfWidth) + (halfWidth - width) / 2;
+                                y = margin + (row * halfHeight) + (halfHeight - height) / 2;
                             }
                             
-                            // Position the image in grid
-                            const row = Math.floor(j / 2);
-                            const col = j % 2;
-                            
-                            x = margin + (col * halfWidth) + (halfWidth - width) / 2;
-                            y = margin + (row * halfHeight) + (halfHeight - height) / 2;
+                            // Draw the image
+                            page.drawImage(image, {
+                                x,
+                                y,
+                                width,
+                                height,
+                                borderWidth,
+                                borderColor: rgb(
+                                    parseInt(borderColorValue.slice(1, 3), 16) / 255,
+                                    parseInt(borderColorValue.slice(3, 5), 16) / 255,
+                                    parseInt(borderColorValue.slice(5, 7), 16) / 255
+                                )
+                            });
+                        } catch (embedError) {
+                            console.error(`Error embedding image ${i + j + 1}:`, embedError);
+                            continue; // Skip this image but continue with others
                         }
-                        
-                        // Draw the image
-                        page.drawImage(image, {
-                            x,
-                            y,
-                            width,
-                            height,
-                            borderWidth,
-                            borderColor: rgb(
-                                parseInt(borderColorValue.slice(1, 3), 16) / 255,
-                                parseInt(borderColorValue.slice(3, 5), 16) / 255,
-                                parseInt(borderColorValue.slice(5, 7), 16) / 255
-                            )
-                        });
                     }
                 }
                 
@@ -868,9 +1026,11 @@
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
+                showAlert('PDF generated successfully!', 'success');
+                
             } catch (error) {
                 console.error('Error generating PDF:', error);
-                alert('An error occurred while generating the PDF. Please try again.');
+                showAlert('An error occurred while generating the PDF. Please try again.');
             } finally {
                 downloadBtn.disabled = false;
                 downloadBtn.innerHTML = '<i class="fas fa-file-pdf"></i> Generate & Download PDF';
